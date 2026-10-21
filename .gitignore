@@ -1,0 +1,21 @@
+# 启动器自测产生的临时目录
+.launcher-test/
+
+# 构建与打包产物
+dist/
+build/
+
+# 日志
+*.log
+
+# 本地笔记数据（正常情况下写在 %LOCALAPPDATA%\JianNote）
+notes.json
+notes.backup.json
+settings.json
+
+# 编辑器 / 系统
+.vs/
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
