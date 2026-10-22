@@ -1,15 +1,8 @@
-@echo off
+﻿@echo off
 chcp 65001 >nul
 cd /d "%~dp0"
-if exist "%~dp0简笺.exe" (
-    start "" "%~dp0简笺.exe"
-    exit /b 0
-)
 
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -STA -File "%~dp0JianNote.ps1"
-if errorlevel 1 (
-    echo.
-    echo 简笺启动失败，请将本窗口中的错误信息告诉开发者。
-    pause
-)
-
+rem 本地运行时直接调用主程序，绕开 exe 启动器：
+rem 未签名的 exe 每次重新编译都会被 SmartScreen 拦一道，脚本方式没有这个问题。
+start "" powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File "%~dp0JianNote.ps1"
+exit /b 0

@@ -1,4 +1,4 @@
-# 简笺 JianNote
+﻿# 简笺 JianNote
 
 一个极简、离线、无需安装的 Windows 便签 / 笔记应用：双击就能写，关掉就保存，数据只留在本机。
 
@@ -14,6 +14,11 @@
 1. 下载并解压发布包（Releases 里最新的 zip，如 `jian-note-v0.2.0.zip`）。
 2. 保持 `简笺.exe`、`JianNote.ps1`、`启动简笺.bat` 三个文件在**同一个文件夹**里。
 3. 双击 `简笺.exe` 即可启动；首次启动会生成一条欢迎笔记。
+
+若双击 exe 时被 Windows 的 SmartScreen 拦下（未签名程序的常见提示），点“更多信息 → 仍要运行”即可；
+也可以直接双击 `启动简笺.bat`，它不经过 exe，直接用系统自带 PowerShell 运行主程序。
+
+> 同一时间只允许运行一个实例：重复双击会提示“简笺已经在运行了”，不会开出两个窗口同时写数据。
 
 > `简笺.exe` 只是启动器，它会到同目录寻找 `JianNote.ps1` 并交给系统自带的 PowerShell 运行，
 > 所以不要只把 exe 单独复制出去。
@@ -39,6 +44,9 @@
 | 上一版备份 | `%LOCALAPPDATA%\JianNote\notes.backup.json` |
 | 界面设置 | `%LOCALAPPDATA%\JianNote\settings.json` |
 | 启动日志 | `%LOCALAPPDATA%\JianNote\startup.log` |
+
+若该目录不可写（例如被安全软件拦截），启动器会改用 `%TEMP%\JianNote\startup.log`；
+日志写不进去也不会阻止应用启动。
 
 卸载方式：删除程序文件夹，再删除上面这个数据目录即可，不写注册表、不留后台服务。
 

@@ -96,11 +96,25 @@ function Save-Notes {
     } | ConvertTo-Json -Depth 8
 
     $tempFile = Join-Path $script:AppDataDirectory 'notes.tmp.json'
-    [System.IO.File]::WriteAllText($tempFile, $payload, [System.Text.UTF8Encoding]::new($false))
-    if (Test-Path -LiteralPath $script:DataFile) {
-        Copy-Item -LiteralPath $script:DataFile -Destination $script:BackupFile -Force
+
+    # 另一个实例或安全软件可能短暂占用数据文件，重试几次再放弃，避免丢改动
+    $attempt = 0
+    while ($true) {
+        try {
+            [System.IO.File]::WriteAllText($tempFile, $payload, [System.Text.UTF8Encoding]::new($false))
+            if (Test-Path -LiteralPath $script:DataFile) {
+                Copy-Item -LiteralPath $script:DataFile -Destination $script:BackupFile -Force
+            }
+            Move-Item -LiteralPath $tempFile -Destination $script:DataFile -Force
+            break
+        }
+        catch [System.IO.IOException], [System.UnauthorizedAccessException] {
+            $attempt++
+            if ($attempt -ge 3) { throw }
+            Start-Sleep -Milliseconds 200
+        }
     }
-    Move-Item -LiteralPath $tempFile -Destination $script:DataFile -Force
+
     $script:PendingSave = $false
 }
 
