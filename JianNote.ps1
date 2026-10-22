@@ -12,7 +12,7 @@ Add-Type -AssemblyName WindowsBase
 Add-Type -AssemblyName System.Windows.Forms
 
 $script:AppName = '简笺'
-$script:AppVersion = '0.2.1'
+$script:AppVersion = '0.3.0'
 $script:AppDataDirectory = if ($SelfTest) {
     Join-Path ([System.IO.Path]::GetTempPath()) ('JianNote-SelfTest-' + [Guid]::NewGuid().ToString('N'))
 } else {
@@ -31,6 +31,7 @@ $script:PendingSave = $false
 $script:IsMultiSelectMode = $false
 $script:BodyFontSize = 15.0
 $script:EmphasisFontSize = 18.0
+$script:IsPreviewing = $false
 
 function New-NoteObject {
     param(
@@ -367,12 +368,13 @@ function Load-Settings {
           <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         <Grid>
-          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
           <TextBlock x:Name="SaveStatus" Text="已保存" Foreground="{DynamicResource SecondaryText}" FontSize="11" VerticalAlignment="Center"/>
-          <Button x:Name="EmphasisButton" Grid.Column="1" Style="{StaticResource IconButton}" Width="52" FontSize="12" Content="重点" ToolTip="重点标记：选中文字后略微放大并标红，再点一次取消（Ctrl+B）"/>
-          <Button x:Name="PinButton" Grid.Column="2" Style="{StaticResource IconButton}" Content="☆" ToolTip="置顶"/>
-          <Button x:Name="ExportNoteButton" Grid.Column="3" Style="{StaticResource IconButton}" Content="↧" ToolTip="导出当前笔记"/>
-          <Button x:Name="DeleteButton" Grid.Column="4" Style="{StaticResource IconButton}" Content="⌫" ToolTip="移到回收站"/>
+          <Button x:Name="PreviewButton" Grid.Column="1" Style="{StaticResource IconButton}" Width="52" FontSize="12" Content="预览" ToolTip="预览 Markdown 效果（Ctrl+P）"/>
+          <Button x:Name="EmphasisButton" Grid.Column="2" Style="{StaticResource IconButton}" Width="52" FontSize="12" Content="重点" ToolTip="重点标记：选中文字后略微放大并标红，再点一次取消（Ctrl+B）"/>
+          <Button x:Name="PinButton" Grid.Column="3" Style="{StaticResource IconButton}" Content="☆" ToolTip="置顶"/>
+          <Button x:Name="ExportNoteButton" Grid.Column="4" Style="{StaticResource IconButton}" Content="↧" ToolTip="导出当前笔记"/>
+          <Button x:Name="DeleteButton" Grid.Column="5" Style="{StaticResource IconButton}" Content="⌫" ToolTip="移到回收站"/>
         </Grid>
         <TextBox x:Name="TitleBox" Grid.Row="1" FontSize="28" FontWeight="SemiBold" Margin="0,22,0,6" Padding="0" AcceptsReturn="False" MaxLength="200"/>
         <TextBox x:Name="TagsBox" Grid.Row="2" FontSize="12" Foreground="{DynamicResource SecondaryText}" Margin="0,2,0,16" Padding="0" ToolTip="用逗号分隔标签"/>
@@ -388,6 +390,7 @@ function Load-Settings {
             <Paragraph LineHeight="25" LineStackingStrategy="BlockLineHeight" Margin="0"><Run/></Paragraph>
           </FlowDocument>
         </RichTextBox>
+        <FlowDocumentScrollViewer x:Name="PreviewBox" Grid.Row="3" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" Background="Transparent" BorderThickness="0" Padding="0,4,8,10" IsToolBarVisible="False"/>
         <Grid Grid.Row="4" Margin="0,10,0,0">
           <TextBlock x:Name="UpdatedText" Foreground="{DynamicResource SecondaryText}" FontSize="11"/>
           <TextBlock x:Name="StatsText" HorizontalAlignment="Right" Foreground="{DynamicResource SecondaryText}" FontSize="11"/>
@@ -431,7 +434,7 @@ $controlNames = @(
     'NewNoteButton','AllNotesButton','PinnedButton','TrashButton','ImportButton','ExportAllButton','ThemeButton',
     'ViewTitle','MultiSelectButton','EmptyTrashButton','SearchBox','SearchHint','BatchBar','BatchSelectionText','BatchExportButton','BatchDeleteButton',
     'NotesList','EmptyListPanel','EmptyListText','NoteCountText','StorageText','EditorPanel','NoSelectionPanel','MultiSelectionPanel','MultiSelectionTitle',
-    'SaveStatus','EmphasisButton','PinButton','ExportNoteButton','DeleteButton','TitleBox','TagsBox',
+    'SaveStatus','PreviewButton','EmphasisButton','PinButton','ExportNoteButton','DeleteButton','TitleBox','TagsBox','PreviewBox',
     'ContentBox','UpdatedText','StatsText'
 )
 foreach ($name in $controlNames) {
@@ -720,8 +723,261 @@ function Update-EmphasisBrush {
     }
 }
 
-function Set-Emphasis {
+function Get-MarkdownBrush {
+    param([string]$Role)
+
+    $color = switch ($Role) {
+        'Code' { if ($script:IsDark) { '#9DB4C0' } else { '#B93B5A' } }
+        'CodeBg' { if ($script:IsDark) { '#20252B' } else { '#F3F4F6' } }
+        'Quote' { if ($script:IsDark) { '#A8B2BD' } else { '#6B7480' } }
+        'Rule' { if ($script:IsDark) { '#3A3F45' } else { '#E3E6EA' } }
+        'Heading' { if ($script:IsDark) { '#F2F5F8' } else { '#1B2027' } }
+        'Link' { if ($script:IsDark) { '#8FA6FF' } else { '#4C6FFF' } }
+        default { if ($script:IsDark) { '#DDE2E8' } else { '#282E36' } }
+    }
+
+    return [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.ColorConverter]::ConvertFromString($color))
+}
+
+function Add-MarkdownInlines {
+    param(
+        [System.Windows.Documents.Paragraph]$Target,
+        [string]$Text
+    )
+
+    if ([string]::IsNullOrEmpty($Text)) { return }
+
+    $pattern = '`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\)'
+    $position = 0
+
+    foreach ($match in [regex]::Matches($Text, $pattern)) {
+        if ($match.Index -gt $position) {
+            [void]$Target.Inlines.Add([System.Windows.Documents.Run]::new($Text.Substring($position, $match.Index - $position)))
+        }
+
+        $token = $match.Value
+        if ($token.Length -gt 2 -and $token.StartsWith('`')) {
+            $run = [System.Windows.Documents.Run]::new($token.Substring(1, $token.Length - 2))
+            $run.FontFamily = [System.Windows.Media.FontFamily]::new('Consolas')
+            $run.Foreground = Get-MarkdownBrush 'Code'
+            [void]$Target.Inlines.Add($run)
+        }
+        elseif ($token.StartsWith('**') -and $token.Length -gt 4) {
+            $run = [System.Windows.Documents.Run]::new($token.Substring(2, $token.Length - 4))
+            $run.FontWeight = [System.Windows.FontWeights]::SemiBold
+            [void]$Target.Inlines.Add($run)
+        }
+        elseif ($token.StartsWith('[') -and $token.Contains('](')) {
+            $splitIndex = $token.IndexOf('](')
+            $label = $token.Substring(1, $splitIndex - 1)
+            $url = $token.Substring($splitIndex + 2, $token.Length - $splitIndex - 3)
+            $link = [System.Windows.Documents.Hyperlink]::new()
+            $link.Foreground = Get-MarkdownBrush 'Link'
+            try { $link.NavigateUri = [Uri]$url } catch { }
+            [void]$link.Inlines.Add([System.Windows.Documents.Run]::new($label))
+            $link.Add_RequestNavigate({
+                param($sender, $eventArgs)
+                try { Start-Process $eventArgs.Uri.AbsoluteUri } catch { }
+                $eventArgs.Handled = $true
+            })
+            [void]$Target.Inlines.Add($link)
+        }
+        elseif ($token.Length -gt 2 -and $token.StartsWith('*')) {
+            $run = [System.Windows.Documents.Run]::new($token.Substring(1, $token.Length - 2))
+            $run.FontStyle = [System.Windows.FontStyles]::Italic
+            [void]$Target.Inlines.Add($run)
+        }
+
+        $position = $match.Index + $match.Length
+    }
+
+    if ($position -lt $Text.Length) {
+        [void]$Target.Inlines.Add([System.Windows.Documents.Run]::new($Text.Substring($position)))
+    }
+}
+
+function Add-PreviewCodeBlock {
+    param(
+        [System.Windows.Documents.FlowDocument]$Document,
+        [object]$Lines
+    )
+
+    $items = @($Lines)
+    if ($items.Count -eq 0) { return }
+
+    $section = [System.Windows.Documents.Section]::new()
+    $section.Background = Get-MarkdownBrush 'CodeBg'
+    $section.Padding = [System.Windows.Thickness]::new(10, 8, 10, 8)
+    $section.Margin = [System.Windows.Thickness]::new(0, 6, 0, 10)
+
+    $paragraph = [System.Windows.Documents.Paragraph]::new()
+    $paragraph.FontFamily = [System.Windows.Media.FontFamily]::new('Consolas')
+    $paragraph.FontSize = 13
+    $paragraph.LineHeight = 20
+    $paragraph.Margin = [System.Windows.Thickness]::new(0)
+    [void]$paragraph.Inlines.Add([System.Windows.Documents.Run]::new(($items -join "`r`n")))
+    [void]$section.Blocks.Add($paragraph)
+    [void]$Document.Blocks.Add($section)
+}
+
+function ConvertTo-PreviewDocument {
+    param([string]$Text)
+
+    $document = [System.Windows.Documents.FlowDocument]::new()
+    $document.PagePadding = [System.Windows.Thickness]::new(0)
+    $document.FontFamily = [System.Windows.Media.FontFamily]::new('Microsoft YaHei UI')
+    $document.FontSize = 15
+    $document.Foreground = Get-MarkdownBrush 'Default'
+
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        $emptyParagraph = [System.Windows.Documents.Paragraph]::new()
+        $emptyRun = [System.Windows.Documents.Run]::new('这条笔记还没有内容。')
+        $emptyRun.Foreground = Get-MarkdownBrush 'Quote'
+        [void]$emptyParagraph.Inlines.Add($emptyRun)
+        [void]$document.Blocks.Add($emptyParagraph)
+        return $document
+    }
+
+    $lines = $Text -split "\r?\n"
+    $codeLines = New-Object System.Collections.ArrayList
+    $inCode = $false
+
+    foreach ($line in $lines) {
+        if ($line -match '^\s*```') {
+            if ($inCode) {
+                Add-PreviewCodeBlock -Document $document -Lines @($codeLines)
+                $codeLines.Clear()
+                $inCode = $false
+            }
+            else {
+                $inCode = $true
+            }
+            continue
+        }
+
+        if ($inCode) {
+            [void]$codeLines.Add($line)
+            continue
+        }
+
+        if ($line -match '^\s*$') {
+            $spacer = [System.Windows.Documents.Paragraph]::new()
+            $spacer.Margin = [System.Windows.Thickness]::new(0)
+            $spacer.FontSize = 7
+            [void]$document.Blocks.Add($spacer)
+            continue
+        }
+
+        if ($line -match '^(#{1,6})\s+(.*)$') {
+            $level = $Matches[1].Length
+            $headingSizes = @(26, 22, 19, 17, 16, 15)
+            $paragraph = [System.Windows.Documents.Paragraph]::new()
+            $paragraph.FontSize = $headingSizes[$level - 1]
+            $paragraph.FontWeight = [System.Windows.FontWeights]::Bold
+            $paragraph.Foreground = Get-MarkdownBrush 'Heading'
+            $paragraph.LineHeight = $headingSizes[$level - 1] + 10
+            if ($level -le 2) {
+                $paragraph.Margin = [System.Windows.Thickness]::new(0, 10, 0, 4)
+            }
+            else {
+                $paragraph.Margin = [System.Windows.Thickness]::new(0, 8, 0, 3)
+            }
+            Add-MarkdownInlines -Target $paragraph -Text $Matches[2]
+            [void]$document.Blocks.Add($paragraph)
+            continue
+        }
+
+        if ($line -match '^\s*[-*+]\s+(.*)$') {
+            $paragraph = [System.Windows.Documents.Paragraph]::new()
+            $paragraph.Margin = [System.Windows.Thickness]::new(18, 2, 0, 2)
+            $paragraph.TextIndent = -14
+            $bullet = [System.Windows.Documents.Run]::new('•  ')
+            $bullet.Foreground = Get-MarkdownBrush 'Quote'
+            [void]$paragraph.Inlines.Add($bullet)
+            Add-MarkdownInlines -Target $paragraph -Text $Matches[1]
+            [void]$document.Blocks.Add($paragraph)
+            continue
+        }
+
+        if ($line -match '^\s*(\d+)\.\s+(.*)$') {
+            $paragraph = [System.Windows.Documents.Paragraph]::new()
+            $paragraph.Margin = [System.Windows.Thickness]::new(18, 2, 0, 2)
+            $paragraph.TextIndent = -18
+            [void]$paragraph.Inlines.Add([System.Windows.Documents.Run]::new(($Matches[1] + '.  ')))
+            Add-MarkdownInlines -Target $paragraph -Text $Matches[2]
+            [void]$document.Blocks.Add($paragraph)
+            continue
+        }
+
+        if ($line -match '^\s*>\s?(.*)$') {
+            $paragraph = [System.Windows.Documents.Paragraph]::new()
+            $paragraph.Margin = [System.Windows.Thickness]::new(12, 4, 0, 6)
+            $paragraph.Padding = [System.Windows.Thickness]::new(10, 2, 0, 2)
+            $paragraph.BorderThickness = [System.Windows.Thickness]::new(3, 0, 0, 0)
+            $paragraph.BorderBrush = Get-MarkdownBrush 'Rule'
+            $quoteRun = [System.Windows.Documents.Run]::new($Matches[1])
+            $quoteRun.FontStyle = [System.Windows.FontStyles]::Italic
+            $quoteRun.Foreground = Get-MarkdownBrush 'Quote'
+            [void]$paragraph.Inlines.Add($quoteRun)
+            [void]$document.Blocks.Add($paragraph)
+            continue
+        }
+
+        if ($line -match '^\s*([-*_]\s*){3,}$') {
+            $ruleParagraph = [System.Windows.Documents.Paragraph]::new()
+            $ruleParagraph.Margin = [System.Windows.Thickness]::new(0, 10, 0, 10)
+            $ruleParagraph.BorderThickness = [System.Windows.Thickness]::new(0, 1, 0, 0)
+            $ruleParagraph.BorderBrush = Get-MarkdownBrush 'Rule'
+            [void]$document.Blocks.Add($ruleParagraph)
+            continue
+        }
+
+        $paragraph = [System.Windows.Documents.Paragraph]::new()
+        $paragraph.Margin = [System.Windows.Thickness]::new(0, 2, 0, 2)
+        $paragraph.LineHeight = 24
+        $paragraph.LineStackingStrategy = [System.Windows.LineStackingStrategy]::BlockLineHeight
+        Add-MarkdownInlines -Target $paragraph -Text $line
+        [void]$document.Blocks.Add($paragraph)
+    }
+
+    if ($inCode -and $codeLines.Count -gt 0) {
+        Add-PreviewCodeBlock -Document $document -Lines @($codeLines)
+    }
+
+    return $document
+}
+
+function Update-Preview {
+    if (-not $script:IsPreviewing) { return }
+    $PreviewBox.Document = ConvertTo-PreviewDocument -Text (Get-EditorPlainText)
+}
+
+function Toggle-Preview {
     if ($script:IsMultiSelectMode) { return }
+    $note = Get-NoteById $script:SelectedNoteId
+    if ($null -eq $note) { return }
+
+    $script:IsPreviewing = -not $script:IsPreviewing
+
+    if ($script:IsPreviewing) {
+        if ($script:PendingSave) { Commit-Editor }
+        $PreviewBox.Document = ConvertTo-PreviewDocument -Text (Get-EditorPlainText)
+        $ContentBox.Visibility = 'Collapsed'
+        $PreviewBox.Visibility = 'Visible'
+        $PreviewButton.Content = '编辑'
+        $PreviewButton.ToolTip = '回到编辑模式（Ctrl+P）'
+    }
+    else {
+        $PreviewBox.Visibility = 'Collapsed'
+        $ContentBox.Visibility = 'Visible'
+        $PreviewButton.Content = '预览'
+        $PreviewButton.ToolTip = '预览 Markdown 效果（Ctrl+P）'
+        $ContentBox.Focus()
+    }
+}
+
+function Set-Emphasis {
+    if ($script:IsMultiSelectMode -or $script:IsPreviewing) { return }
     $note = Get-NoteById $script:SelectedNoteId
     if ($null -eq $note -or $note.IsDeleted) { return }
 
@@ -777,6 +1033,19 @@ function Show-SelectedNote {
     $NoSelectionPanel.Visibility = 'Collapsed'
     $MultiSelectionPanel.Visibility = 'Collapsed'
     $EditorPanel.Visibility = 'Visible'
+    if ($script:IsPreviewing) {
+        $PreviewBox.Document = ConvertTo-PreviewDocument -Text (Get-EditorPlainText)
+        $ContentBox.Visibility = 'Collapsed'
+        $PreviewBox.Visibility = 'Visible'
+        $PreviewButton.Content = '编辑'
+        $PreviewButton.ToolTip = '回到编辑模式（Ctrl+P）'
+    }
+    else {
+        $ContentBox.Visibility = 'Visible'
+        $PreviewBox.Visibility = 'Collapsed'
+        $PreviewButton.Content = '预览'
+        $PreviewButton.ToolTip = '预览 Markdown 效果（Ctrl+P）'
+    }
     $script:IsLoadingEditor = $false
 }
 
@@ -1109,6 +1378,7 @@ $MultiSelectButton.Add_Click({
 $BatchExportButton.Add_Click({ Export-SelectedNotes })
 $BatchDeleteButton.Add_Click({ Move-SelectedNotesToTrash })
 $EmptyTrashButton.Add_Click({ Clear-Trash })
+$PreviewButton.Add_Click({ Toggle-Preview })
 $EmphasisButton.Add_Click({ Set-Emphasis })
 $PinButton.Add_Click({
     if ($script:PendingSave) { Commit-Editor }
@@ -1136,6 +1406,7 @@ $ThemeButton.Add_Click({
     Apply-Theme
     if ($EditorPanel.Visibility -eq 'Visible') {
         Update-EmphasisBrush
+        Update-Preview
         if ($script:SelectedNoteId) { $script:PendingSave = $true; $saveTimer.Start() }
     }
     Save-Settings
@@ -1149,6 +1420,7 @@ $window.Add_PreviewKeyDown({
     elseif ($ctrl -and $eventArgs.Key -eq 'F') { $SearchBox.Focus(); $SearchBox.SelectAll(); $eventArgs.Handled = $true }
     elseif ($ctrl -and $eventArgs.Key -eq 'S') { if ($script:PendingSave) { Commit-Editor }; $SaveStatus.Text = '已保存'; $eventArgs.Handled = $true }
     elseif ($ctrl -and $eventArgs.Key -eq 'B' -and $ContentBox.IsKeyboardFocusWithin) { Set-Emphasis; $eventArgs.Handled = $true }
+    elseif ($ctrl -and $eventArgs.Key -eq 'P') { Toggle-Preview; $eventArgs.Handled = $true }
     elseif ($ctrl -and $shift -and $eventArgs.Key -eq 'E') { Export-AllNotes; $eventArgs.Handled = $true }
     elseif ($ctrl -and $eventArgs.Key -eq 'E' -and $script:IsMultiSelectMode) { Export-SelectedNotes; $eventArgs.Handled = $true }
     elseif ($ctrl -and $eventArgs.Key -eq 'E') { Export-CurrentNote; $eventArgs.Handled = $true }
@@ -1220,6 +1492,36 @@ if ($SelfTest) {
     if ($null -eq $reloadedNote) { throw 'Self-test failed: note with emphasis was not saved.' }
     if ([string]::IsNullOrWhiteSpace([string]$reloadedNote.RichContent)) { throw 'Self-test failed: RichContent was not persisted to disk.' }
     if ([string]$reloadedNote.Content -ne '普通文字 重点文字') { throw 'Self-test failed: plain text was not persisted next to RichContent.' }
+
+    # Markdown 预览渲染
+    $sampleMarkdown = @'
+# 标题一
+
+## 标题二
+
+- 列表项
+- 带 **加粗** 与 `代码` 的项
+
+> 一段引用
+
+1. 有序一
+2. 有序二
+
+```powershell
+Write-Host 'hi'
+```
+
+---
+
+普通段落，含 [链接](https://github.com)。
+'@
+    $previewDocument = ConvertTo-PreviewDocument -Text $sampleMarkdown
+    if ($previewDocument.Blocks.Count -lt 8) { throw 'Self-test failed: markdown preview produced too few blocks.' }
+    $previewText = ([System.Windows.Documents.TextRange]::new($previewDocument.ContentStart, $previewDocument.ContentEnd)).Text
+    foreach ($expected in @('标题一', '列表项', '一段引用', '有序一', 'Write-Host', '普通段落')) {
+        if (-not $previewText.Contains($expected)) { throw "Self-test failed: markdown preview lost '$expected'." }
+    }
+    $script:IsPreviewing = $false
 
     Write-Output ("Self-test passed. Loaded {0} note(s)." -f $script:Notes.Count)
     Remove-Item -LiteralPath $script:AppDataDirectory -Recurse -Force

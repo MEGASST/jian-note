@@ -9,6 +9,10 @@
 收起一切干扰：左侧列出笔记，右侧直接写。没有账号、没有云同步、没有常驻后台，所有内容保存在
 `%LOCALAPPDATA%\JianNote\notes.json`。
 
+| 编辑 | 预览 |
+| --- | --- |
+| ![编辑模式](docs/screenshot-edit.png) | ![预览模式](docs/screenshot-preview.png) |
+
 ## 快速开始
 
 1. 下载并解压发布包（Releases 里最新的 zip，如 `jian-note-v0.2.0.zip`）。
@@ -28,13 +32,14 @@
 - 新建、编辑、自动保存（切换笔记或关闭窗口时也会保存）
 - 标题、正文、标签全文搜索
 - 重点标记：选中一段文字后略微放大并标红，再点一次即取消（按钮或 `Ctrl+B`）
+- Markdown 预览：点编辑区右上角「预览」或按 `Ctrl+P`，标题、列表、引用、代码块与链接直接渲染
 - 笔记置顶
 - “全部笔记”支持多选、批量导出、批量移入回收站
 - 回收站、单条永久删除、一键清空
 - 深色 / 浅色主题
 - 导入 `.txt`、`.md` 与简笺 `.json` 备份
 - 单篇导出 Markdown、全部导出 JSON 备份
-- 快捷键：`Ctrl+N` 新建、`Ctrl+F` 搜索、`Ctrl+S` 保存、`Ctrl+B` 重点标记、`Ctrl+E` 导出当前笔记、`Ctrl+Shift+E` 备份全部
+- 快捷键：`Ctrl+N` 新建、`Ctrl+F` 搜索、`Ctrl+S` 保存、`Ctrl+B` 重点标记、`Ctrl+P` 预览、`Ctrl+E` 导出当前笔记、`Ctrl+Shift+E` 备份全部
 
 ## 数据与日志
 
@@ -59,6 +64,8 @@
 ├─ 启动简笺.bat            备用启动入口
 ├─ launcher/
 │  └─ JianNoteLauncher.cs  启动器源码：定位 PowerShell、写日志、异常弹窗
+├─ 简笺.ico                应用图标（编译进 exe，也用作窗口图标）
+├─ docs/                   截图与社交预览图
 ├─ build.ps1               重新编译启动器，可选打包 zip
 ├─ LICENSE                 MIT
 └─ README.md
@@ -93,9 +100,10 @@ pwsh -File .\build.ps1 -Zip     # 顺便打包 dist\jian-note-v<版本号>.zip
 
 ## 已知限制
 
-- 当前是 0.2.1 版本
+- 当前是 0.3.0 版本
 - 重点标记只在应用内显示，导出 Markdown 时按纯文本输出
-- 暂无 Markdown 预览、附件、清单、云同步
+- 预览支持标题、列表、引用、代码块、加粗/斜体/行内代码与链接，暂不支持表格和图片
+- 暂无附件、清单、云同步
 - 暂未提供安装包，绿色解压即用
 
 ## 许可证
