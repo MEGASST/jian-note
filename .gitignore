@@ -19,3 +19,6 @@ settings.json
 .idea/
 Thumbs.db
 desktop.ini
+
+# 本机启动快捷方式
+*.lnk
