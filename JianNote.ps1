@@ -12,7 +12,7 @@ Add-Type -AssemblyName WindowsBase
 Add-Type -AssemblyName System.Windows.Forms
 
 $script:AppName = '简笺'
-$script:AppVersion = '0.2.0'
+$script:AppVersion = '0.2.1'
 $script:AppDataDirectory = if ($SelfTest) {
     Join-Path ([System.IO.Path]::GetTempPath()) ('JianNote-SelfTest-' + [Guid]::NewGuid().ToString('N'))
 } else {
@@ -410,6 +410,17 @@ function Load-Settings {
 
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
+
+# 窗口与任务栏图标
+$script:IconPath = Join-Path $PSScriptRoot '简笺.ico'
+if (Test-Path -LiteralPath $script:IconPath) {
+    try {
+        $window.Icon = New-Object System.Windows.Media.Imaging.BitmapImage(New-Object System.Uri($script:IconPath))
+    }
+    catch {
+        # 图标加载失败不影响使用
+    }
+}
 
 if ($ValidateUi) {
     Write-Output 'UI validation passed.'

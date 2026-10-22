@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     编译 简笺 的启动器（C# -> 简笺.exe）。
 
@@ -47,6 +47,7 @@ function Find-CSharpCompiler {
     throw '找不到 .NET Framework 4 的 C# 编译器 csc.exe。请确认系统已启用 .NET Framework 4.x。'
 }
 
+$iconPath = Join-Path $PSScriptRoot '简笺.ico'
 $compiler = Find-CSharpCompiler
 $sources = @(Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'launcher') -Filter '*.cs' -File | ForEach-Object { $_.FullName })
 
@@ -65,6 +66,7 @@ if (-not $NoBuild) {
         '/optimize+'
         '/utf8output'
         "/out:$OutputPath"
+        "/win32icon:$iconPath"
         '/reference:System.dll'
         '/reference:System.Windows.Forms.dll'
     ) + $sources
