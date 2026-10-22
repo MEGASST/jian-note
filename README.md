@@ -11,7 +11,7 @@
 
 ## 快速开始
 
-1. 下载并解压发布包（Releases 中的 `jian-note-v0.1.0.zip`）。
+1. 下载并解压发布包（Releases 里最新的 zip，如 `jian-note-v0.2.0.zip`）。
 2. 保持 `简笺.exe`、`JianNote.ps1`、`启动简笺.bat` 三个文件在**同一个文件夹**里。
 3. 双击 `简笺.exe` 即可启动；首次启动会生成一条欢迎笔记。
 
@@ -22,13 +22,14 @@
 
 - 新建、编辑、自动保存（切换笔记或关闭窗口时也会保存）
 - 标题、正文、标签全文搜索
+- 重点标记：选中一段文字后略微放大并标红，再点一次即取消（按钮或 `Ctrl+B`）
 - 笔记置顶
 - “全部笔记”支持多选、批量导出、批量移入回收站
 - 回收站、单条永久删除、一键清空
 - 深色 / 浅色主题
 - 导入 `.txt`、`.md` 与简笺 `.json` 备份
 - 单篇导出 Markdown、全部导出 JSON 备份
-- 快捷键：`Ctrl+N` 新建、`Ctrl+F` 搜索、`Ctrl+S` 保存、`Ctrl+E` 导出当前笔记、`Ctrl+Shift+E` 备份全部
+- 快捷键：`Ctrl+N` 新建、`Ctrl+F` 搜索、`Ctrl+S` 保存、`Ctrl+B` 重点标记、`Ctrl+E` 导出当前笔记、`Ctrl+Shift+E` 备份全部
 
 ## 数据与日志
 
@@ -61,7 +62,7 @@
 
 ```powershell
 pwsh -File .\build.ps1          # 只生成 简笺.exe
-pwsh -File .\build.ps1 -Zip     # 顺便打包 dist\jian-note-v0.1.0.zip
+pwsh -File .\build.ps1 -Zip     # 顺便打包 dist\jian-note-v<版本号>.zip
 ```
 
 `JianNote.ps1` 无需编译，改完直接运行。
@@ -72,8 +73,8 @@ pwsh -File .\build.ps1 -Zip     # 顺便打包 dist\jian-note-v0.1.0.zip
 .\简笺.exe --self-test
 ```
 
-该流程会走一遍“加载笔记 → 多选 → 批量移入回收站 → 清空回收站”，通过时退出码为 0，
-输出 `Self-test passed.`。
+该流程会走一遍“加载笔记 → 多选 → 批量移入回收站 → 清空回收站”，并校验重点标记的格式
+能正确序列化、存盘后重新读取，通过时退出码为 0，输出 `Self-test passed.`。
 
 ## 兼容性
 
@@ -84,7 +85,8 @@ pwsh -File .\build.ps1 -Zip     # 顺便打包 dist\jian-note-v0.1.0.zip
 
 ## 已知限制
 
-- 当前是 0.1.0 原型版本
+- 当前是 0.2.0 版本
+- 重点标记只在应用内显示，导出 Markdown 时按纯文本输出
 - 暂无 Markdown 预览、附件、清单、云同步
 - 暂未提供安装包，绿色解压即用
 

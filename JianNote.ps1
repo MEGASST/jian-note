@@ -12,7 +12,7 @@ Add-Type -AssemblyName WindowsBase
 Add-Type -AssemblyName System.Windows.Forms
 
 $script:AppName = '简笺'
-$script:AppVersion = '0.1.0'
+$script:AppVersion = '0.2.0'
 $script:AppDataDirectory = if ($SelfTest) {
     Join-Path ([System.IO.Path]::GetTempPath()) ('JianNote-SelfTest-' + [Guid]::NewGuid().ToString('N'))
 } else {
@@ -29,21 +29,25 @@ $script:IsLoadingEditor = $false
 $script:IsDark = $false
 $script:PendingSave = $false
 $script:IsMultiSelectMode = $false
+$script:BodyFontSize = 15.0
+$script:EmphasisFontSize = 18.0
 
 function New-NoteObject {
     param(
         [string]$Title = '',
         [string]$Content = '',
-        [string[]]$Tags = @()
+        [string[]]$Tags = @(),
+        [string]$RichContent = ''
     )
 
     $now = [DateTime]::UtcNow.ToString('o')
     [PSCustomObject]@{
         Id        = [Guid]::NewGuid().ToString('N')
         Title     = $Title
-        Content   = $Content
-        Tags      = @($Tags)
-        IsPinned  = $false
+        Content     = $Content
+        RichContent = $RichContent
+        Tags        = @($Tags)
+        IsPinned    = $false
         IsDeleted = $false
         CreatedAt = $now
         UpdatedAt = $now
@@ -57,6 +61,7 @@ function ConvertTo-NormalizedNote {
     $id = if ($InputObject.PSObject.Properties['Id'] -and $InputObject.Id) { [string]$InputObject.Id } else { [Guid]::NewGuid().ToString('N') }
     $title = if ($InputObject.PSObject.Properties['Title']) { [string]$InputObject.Title } else { '' }
     $content = if ($InputObject.PSObject.Properties['Content']) { [string]$InputObject.Content } else { '' }
+    $richContent = if ($InputObject.PSObject.Properties['RichContent']) { [string]$InputObject.RichContent } else { '' }
     $tags = if ($InputObject.PSObject.Properties['Tags']) { @($InputObject.Tags | ForEach-Object { [string]$_ }) } else { @() }
     $isPinned = if ($InputObject.PSObject.Properties['IsPinned']) { [bool]$InputObject.IsPinned } else { $false }
     $isDeleted = if ($InputObject.PSObject.Properties['IsDeleted']) { [bool]$InputObject.IsDeleted } else { $false }
@@ -66,8 +71,9 @@ function ConvertTo-NormalizedNote {
     [PSCustomObject]@{
         Id        = $id
         Title     = $title
-        Content   = $content
-        Tags      = $tags
+        Content     = $content
+        RichContent = $richContent
+        Tags        = $tags
         IsPinned  = $isPinned
         IsDeleted = $isDeleted
         CreatedAt = $createdAt
@@ -84,7 +90,7 @@ function Ensure-DataDirectory {
 function Save-Notes {
     Ensure-DataDirectory
     $payload = [PSCustomObject]@{
-        Version = 1
+        Version = 2
         SavedAt = [DateTime]::UtcNow.ToString('o')
         Notes   = @($script:Notes)
     } | ConvertTo-Json -Depth 8
@@ -174,6 +180,7 @@ function Load-Settings {
     <SolidColorBrush x:Key="Border" Color="#E5E8EC"/>
     <SolidColorBrush x:Key="Hover" Color="#ECEFF3"/>
     <SolidColorBrush x:Key="Danger" Color="#E55353"/>
+    <SolidColorBrush x:Key="EmphasisText" Color="#C62828"/>
 
     <Style TargetType="TextBlock">
       <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
@@ -211,6 +218,13 @@ function Load-Settings {
       <Setter Property="Padding" Value="0"/>
     </Style>
     <Style TargetType="TextBox">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="CaretBrush" Value="{DynamicResource Accent}"/>
+      <Setter Property="SelectionBrush" Value="{DynamicResource Accent}"/>
+    </Style>
+    <Style TargetType="RichTextBox">
       <Setter Property="Background" Value="Transparent"/>
       <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
       <Setter Property="BorderThickness" Value="0"/>
@@ -339,15 +353,27 @@ function Load-Settings {
           <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         <Grid>
-          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
           <TextBlock x:Name="SaveStatus" Text="已保存" Foreground="{DynamicResource SecondaryText}" FontSize="11" VerticalAlignment="Center"/>
-          <Button x:Name="PinButton" Grid.Column="1" Style="{StaticResource IconButton}" Content="☆" ToolTip="置顶"/>
-          <Button x:Name="ExportNoteButton" Grid.Column="2" Style="{StaticResource IconButton}" Content="↧" ToolTip="导出当前笔记"/>
-          <Button x:Name="DeleteButton" Grid.Column="3" Style="{StaticResource IconButton}" Content="⌫" ToolTip="移到回收站"/>
+          <Button x:Name="EmphasisButton" Grid.Column="1" Style="{StaticResource IconButton}" Width="52" FontSize="12" Content="重点" ToolTip="重点标记：选中文字后略微放大并标红，再点一次取消（Ctrl+B）"/>
+          <Button x:Name="PinButton" Grid.Column="2" Style="{StaticResource IconButton}" Content="☆" ToolTip="置顶"/>
+          <Button x:Name="ExportNoteButton" Grid.Column="3" Style="{StaticResource IconButton}" Content="↧" ToolTip="导出当前笔记"/>
+          <Button x:Name="DeleteButton" Grid.Column="4" Style="{StaticResource IconButton}" Content="⌫" ToolTip="移到回收站"/>
         </Grid>
         <TextBox x:Name="TitleBox" Grid.Row="1" FontSize="28" FontWeight="SemiBold" Margin="0,22,0,6" Padding="0" AcceptsReturn="False" MaxLength="200"/>
         <TextBox x:Name="TagsBox" Grid.Row="2" FontSize="12" Foreground="{DynamicResource SecondaryText}" Margin="0,2,0,16" Padding="0" ToolTip="用逗号分隔标签"/>
-        <TextBox x:Name="ContentBox" Grid.Row="3" FontSize="15" TextBlock.LineHeight="25" TextWrapping="Wrap" AcceptsReturn="True" AcceptsTab="True" VerticalScrollBarVisibility="Auto" Padding="0,4,8,10" SpellCheck.IsEnabled="True"/>
+        <RichTextBox x:Name="ContentBox" Grid.Row="3" FontSize="15" Padding="0,4,8,10" VerticalScrollBarVisibility="Auto" AcceptsTab="True" SpellCheck.IsEnabled="True" IsUndoEnabled="True">
+          <RichTextBox.Resources>
+            <Style TargetType="Paragraph">
+              <Setter Property="LineHeight" Value="25"/>
+              <Setter Property="LineStackingStrategy" Value="BlockLineHeight"/>
+              <Setter Property="Margin" Value="0"/>
+            </Style>
+          </RichTextBox.Resources>
+          <FlowDocument PagePadding="0">
+            <Paragraph LineHeight="25" LineStackingStrategy="BlockLineHeight" Margin="0"><Run/></Paragraph>
+          </FlowDocument>
+        </RichTextBox>
         <Grid Grid.Row="4" Margin="0,10,0,0">
           <TextBlock x:Name="UpdatedText" Foreground="{DynamicResource SecondaryText}" FontSize="11"/>
           <TextBlock x:Name="StatsText" HorizontalAlignment="Right" Foreground="{DynamicResource SecondaryText}" FontSize="11"/>
@@ -380,7 +406,7 @@ $controlNames = @(
     'NewNoteButton','AllNotesButton','PinnedButton','TrashButton','ImportButton','ExportAllButton','ThemeButton',
     'ViewTitle','MultiSelectButton','EmptyTrashButton','SearchBox','SearchHint','BatchBar','BatchSelectionText','BatchExportButton','BatchDeleteButton',
     'NotesList','EmptyListPanel','EmptyListText','NoteCountText','StorageText','EditorPanel','NoSelectionPanel','MultiSelectionPanel','MultiSelectionTitle',
-    'SaveStatus','PinButton','ExportNoteButton','DeleteButton','TitleBox','TagsBox',
+    'SaveStatus','EmphasisButton','PinButton','ExportNoteButton','DeleteButton','TitleBox','TagsBox',
     'ContentBox','UpdatedText','StatsText'
 )
 foreach ($name in $controlNames) {
@@ -405,6 +431,7 @@ function Apply-Theme {
         Set-BrushColor 'Border' '#2B2F34'
         Set-BrushColor 'Hover' '#25292E'
         Set-BrushColor 'Danger' '#FF7474'
+        Set-BrushColor 'EmphasisText' '#FF6B6B'
         $ThemeButton.Content = '☀   浅色模式'
     }
     else {
@@ -418,6 +445,7 @@ function Apply-Theme {
         Set-BrushColor 'Border' '#E5E8EC'
         Set-BrushColor 'Hover' '#ECEFF3'
         Set-BrushColor 'Danger' '#E55353'
+        Set-BrushColor 'EmphasisText' '#C62828'
         $ThemeButton.Content = '◐   深色模式'
     }
 }
@@ -574,6 +602,130 @@ function Show-NoSelection {
     }
 }
 
+function New-EditorDocument {
+    param([string]$Text = '')
+
+    $document = [System.Windows.Documents.FlowDocument]::new()
+    $document.PagePadding = [System.Windows.Thickness]::new(0)
+    $normalized = if ($null -eq $Text) { '' } else { $Text -replace "`r`n", "`n" -replace "`r", "`n" }
+    foreach ($line in ($normalized -split "`n", -1)) {
+        $paragraph = [System.Windows.Documents.Paragraph]::new()
+        $paragraph.LineHeight = 25
+        $paragraph.LineStackingStrategy = [System.Windows.LineStackingStrategy]::BlockLineHeight
+        $paragraph.Margin = [System.Windows.Thickness]::new(0)
+        if ($line.Length -gt 0) {
+            [void]$paragraph.Inlines.Add([System.Windows.Documents.Run]::new($line))
+        }
+        [void]$document.Blocks.Add($paragraph)
+    }
+    if ($document.Blocks.Count -eq 0) {
+        [void]$document.Blocks.Add([System.Windows.Documents.Paragraph]::new())
+    }
+    return $document
+}
+
+function Get-EditorPlainText {
+    $document = $ContentBox.Document
+    if ($null -eq $document) { return '' }
+    $range = [System.Windows.Documents.TextRange]::new($document.ContentStart, $document.ContentEnd)
+    $text = [string]$range.Text
+    if ($text.EndsWith("`r`n")) { return $text.Substring(0, $text.Length - 2) }
+    if ($text.EndsWith("`n")) { return $text.Substring(0, $text.Length - 1) }
+    return $text
+}
+
+function Set-EditorPlainText {
+    param([string]$Text = '')
+    $ContentBox.Document = New-EditorDocument -Text $Text
+    $ContentBox.CaretPosition = $ContentBox.Document.ContentStart
+}
+
+function Set-EditorRichContent {
+    param([object]$Note)
+    $rich = [string]$Note.RichContent
+    if (-not [string]::IsNullOrWhiteSpace($rich)) {
+        try {
+            $document = [System.Windows.Markup.XamlReader]::Parse($rich)
+            if ($document -is [System.Windows.Documents.FlowDocument]) {
+                $ContentBox.Document = $document
+                $ContentBox.CaretPosition = $ContentBox.Document.ContentStart
+                return
+            }
+        }
+        catch {
+            # 富文本损坏时退回纯文本，笔记仍然可以打开
+        }
+    }
+    Set-EditorPlainText -Text ([string]$Note.Content)
+}
+
+function Test-EditorHasEmphasis {
+    $document = $ContentBox.Document
+    if ($null -eq $document) { return $false }
+    foreach ($block in $document.Blocks) {
+        if ($block -is [System.Windows.Documents.Paragraph]) {
+            foreach ($inline in $block.Inlines) {
+                if ($inline -is [System.Windows.Documents.Run] -and [Math]::Abs([double]$inline.FontSize - $script:EmphasisFontSize) -lt 0.5) {
+                    return $true
+                }
+            }
+        }
+    }
+    return $false
+}
+
+function Get-EditorRichContent {
+    if (-not (Test-EditorHasEmphasis)) { return '' }
+    return [System.Windows.Markup.XamlWriter]::Save($ContentBox.Document)
+}
+
+function Update-EmphasisBrush {
+    $document = $ContentBox.Document
+    if ($null -eq $document) { return }
+    $brush = $window.Resources['EmphasisText']
+    if ($null -eq $brush) { return }
+    foreach ($block in $document.Blocks) {
+        if ($block -is [System.Windows.Documents.Paragraph]) {
+            foreach ($inline in $block.Inlines) {
+                if ($inline -is [System.Windows.Documents.Run] -and [Math]::Abs([double]$inline.FontSize - $script:EmphasisFontSize) -lt 0.5) {
+                    $inline.Foreground = $brush
+                }
+            }
+        }
+    }
+}
+
+function Set-Emphasis {
+    if ($script:IsMultiSelectMode) { return }
+    $note = Get-NoteById $script:SelectedNoteId
+    if ($null -eq $note -or $note.IsDeleted) { return }
+
+    $selection = $ContentBox.Selection
+    if ($selection.IsEmpty) {
+        $SaveStatus.Text = '请先选中要标记的文字'
+        return
+    }
+
+    $fontSizeProperty = [System.Windows.Documents.TextElement]::FontSizeProperty
+    $currentSize = $selection.GetPropertyValue($fontSizeProperty)
+    $isEmphasized = ($currentSize -is [double]) -and ([Math]::Abs([double]$currentSize - $script:EmphasisFontSize) -lt 0.5)
+
+    if ($isEmphasized) {
+        $selection.ClearAllProperties()
+    }
+    else {
+        $selection.ApplyPropertyValue($fontSizeProperty, $script:EmphasisFontSize)
+        $brush = $window.Resources['EmphasisText']
+        if ($null -ne $brush) {
+            $selection.ApplyPropertyValue([System.Windows.Documents.TextElement]::ForegroundProperty, $brush)
+        }
+    }
+
+    Commit-Editor
+    $SaveStatus.Text = if ($isEmphasized) { '已取消重点标记' } else { '已标记为重点' }
+    $ContentBox.Focus()
+}
+
 function Show-SelectedNote {
     $item = $NotesList.SelectedItem
     if ($null -eq $item) { Show-NoSelection; return }
@@ -583,7 +735,7 @@ function Show-SelectedNote {
     $script:IsLoadingEditor = $true
     $script:SelectedNoteId = $note.Id
     $TitleBox.Text = [string]$note.Title
-    $ContentBox.Text = [string]$note.Content
+    Set-EditorRichContent -Note $note
     $TagsBox.Text = @($note.Tags) -join ', '
     $PinButton.Content = if ($note.IsDeleted) { '↶' } elseif ($note.IsPinned) { '★' } else { '☆' }
     $PinButton.ToolTip = if ($note.IsDeleted) { '恢复笔记' } elseif ($note.IsPinned) { '取消置顶' } else { '置顶' }
@@ -604,7 +756,7 @@ function Show-SelectedNote {
 }
 
 function Update-Stats {
-    $content = $ContentBox.Text
+    $content = Get-EditorPlainText
     $nonSpaceChars = ($content -replace '\s', '').Length
     $lineCount = if ([string]::IsNullOrEmpty($content)) { 0 } else { ($content -split "`r?`n").Count }
     $StatsText.Text = '{0} 字  ·  {1} 行' -f $nonSpaceChars, $lineCount
@@ -643,7 +795,8 @@ function Commit-Editor {
     if ($null -eq $note -or $note.IsDeleted) { return }
 
     $note.Title = $TitleBox.Text.Trim()
-    $note.Content = $ContentBox.Text
+    $note.Content = Get-EditorPlainText
+    $note.RichContent = Get-EditorRichContent
     $note.Tags = @($TagsBox.Text -split '[,，]' | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique)
     $note.UpdatedAt = [DateTime]::UtcNow.ToString('o')
     Save-Notes
@@ -931,6 +1084,7 @@ $MultiSelectButton.Add_Click({
 $BatchExportButton.Add_Click({ Export-SelectedNotes })
 $BatchDeleteButton.Add_Click({ Move-SelectedNotesToTrash })
 $EmptyTrashButton.Add_Click({ Clear-Trash })
+$EmphasisButton.Add_Click({ Set-Emphasis })
 $PinButton.Add_Click({
     if ($script:PendingSave) { Commit-Editor }
     $note = Get-NoteById $script:SelectedNoteId
@@ -952,7 +1106,15 @@ $DeleteButton.Add_MouseRightButtonUp({
 $ExportNoteButton.Add_Click({ Export-CurrentNote })
 $ExportAllButton.Add_Click({ Export-AllNotes })
 $ImportButton.Add_Click({ Import-Notes })
-$ThemeButton.Add_Click({ $script:IsDark = -not $script:IsDark; Apply-Theme; Save-Settings })
+$ThemeButton.Add_Click({
+    $script:IsDark = -not $script:IsDark
+    Apply-Theme
+    if ($EditorPanel.Visibility -eq 'Visible') {
+        Update-EmphasisBrush
+        if ($script:SelectedNoteId) { $script:PendingSave = $true; $saveTimer.Start() }
+    }
+    Save-Settings
+})
 
 $window.Add_PreviewKeyDown({
     param($sender, $eventArgs)
@@ -961,6 +1123,7 @@ $window.Add_PreviewKeyDown({
     if ($ctrl -and $eventArgs.Key -eq 'N') { New-Note; $eventArgs.Handled = $true }
     elseif ($ctrl -and $eventArgs.Key -eq 'F') { $SearchBox.Focus(); $SearchBox.SelectAll(); $eventArgs.Handled = $true }
     elseif ($ctrl -and $eventArgs.Key -eq 'S') { if ($script:PendingSave) { Commit-Editor }; $SaveStatus.Text = '已保存'; $eventArgs.Handled = $true }
+    elseif ($ctrl -and $eventArgs.Key -eq 'B' -and $ContentBox.IsKeyboardFocusWithin) { Set-Emphasis; $eventArgs.Handled = $true }
     elseif ($ctrl -and $shift -and $eventArgs.Key -eq 'E') { Export-AllNotes; $eventArgs.Handled = $true }
     elseif ($ctrl -and $eventArgs.Key -eq 'E' -and $script:IsMultiSelectMode) { Export-SelectedNotes; $eventArgs.Handled = $true }
     elseif ($ctrl -and $eventArgs.Key -eq 'E') { Export-CurrentNote; $eventArgs.Handled = $true }
@@ -1006,6 +1169,33 @@ if ($SelfTest) {
     Save-Notes
     Load-Notes
     if ($script:Notes.Count -ne 0) { throw 'Self-test failed: the first-run note returned after all notes were deleted.' }
+    # 重点标记：纯文本往返与富文本序列化
+    Set-EditorPlainText -Text '普通文字 重点文字'
+    if ((Get-EditorPlainText) -ne '普通文字 重点文字') { throw 'Self-test failed: plain text round-trip lost characters.' }
+    $emphasisParagraph = $ContentBox.Document.Blocks[0]
+    $emphasisRun = $emphasisParagraph.Inlines[0]
+    $emphasisRange = [System.Windows.Documents.TextRange]::new($emphasisRun.ContentStart, $emphasisRun.ContentEnd)
+    $emphasisRange.ApplyPropertyValue([System.Windows.Documents.TextElement]::FontSizeProperty, $script:EmphasisFontSize)
+    if (-not (Test-EditorHasEmphasis)) { throw 'Self-test failed: emphasis formatting was not detected.' }
+    $emphasisXaml = Get-EditorRichContent
+    if ([string]::IsNullOrWhiteSpace($emphasisXaml)) { throw 'Self-test failed: emphasis XAML was empty.' }
+    $ContentBox.Document = [System.Windows.Markup.XamlReader]::Parse($emphasisXaml)
+    if ((Get-EditorPlainText) -ne '普通文字 重点文字') { throw 'Self-test failed: emphasis round-trip changed the text.' }
+    if (-not (Test-EditorHasEmphasis)) { throw 'Self-test failed: emphasis was lost after round-trip.' }
+    Set-EditorPlainText -Text ''
+
+    # 重点标记要随笔记一起保存，并在重新读取后还原
+    $script:Notes.Clear()
+    $richNote = New-NoteObject -Title '重点标记自测' -Content '普通文字 重点文字'
+    $richNote.RichContent = $emphasisXaml
+    [void]$script:Notes.Add($richNote)
+    Save-Notes
+    Load-Notes
+    $reloadedNote = @($script:Notes | Where-Object { $_.Title -eq '重点标记自测' }) | Select-Object -First 1
+    if ($null -eq $reloadedNote) { throw 'Self-test failed: note with emphasis was not saved.' }
+    if ([string]::IsNullOrWhiteSpace([string]$reloadedNote.RichContent)) { throw 'Self-test failed: RichContent was not persisted to disk.' }
+    if ([string]$reloadedNote.Content -ne '普通文字 重点文字') { throw 'Self-test failed: plain text was not persisted next to RichContent.' }
+
     Write-Output ("Self-test passed. Loaded {0} note(s)." -f $script:Notes.Count)
     Remove-Item -LiteralPath $script:AppDataDirectory -Recurse -Force
     exit 0
